@@ -1,96 +1,116 @@
-# Copyright 2021 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import io
 import os
 from urllib.parse import urlparse
 
 import environ
+from django.conf.locale.pl import formats as pl_formats
 from google.cloud import secretmanager
+from google.oauth2 import service_account
+
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# [START gaestd_py_django_secret_config]
+IS_LOCAL_ENVIRON = True if os.environ.get('COMPUTERNAME') else False
+
+
+
+# -----------------------------------------------------------------------------
+# gaestd_py_django_secret_config
+
 env = environ.Env(DEBUG=(bool, False))
 env_file = os.path.join(BASE_DIR, ".env")
 
 if os.path.isfile(env_file):
     # Use a local secret file, if provided
-
     env.read_env(env_file)
-# [START_EXCLUDE]
 elif os.getenv("TRAMPOLINE_CI", None):
     # Create local settings if running with CI, for unit testing
-
     placeholder = (
         f"SECRET_KEY=a\n"
         f"DATABASE_URL=sqlite://{os.path.join(BASE_DIR, 'db.sqlite3')}"
     )
     env.read_env(io.StringIO(placeholder))
-# [END_EXCLUDE]
 elif os.environ.get("GOOGLE_CLOUD_PROJECT", None):
     # Pull secrets from Secret Manager
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
-
     client = secretmanager.SecretManagerServiceClient()
     settings_name = os.environ.get("SETTINGS_NAME", "django_settings")
     name = f"projects/{project_id}/secrets/{settings_name}/versions/latest"
     payload = client.access_secret_version(name=name).payload.data.decode("UTF-8")
-
     env.read_env(io.StringIO(payload))
 else:
     raise Exception("No local .env or GOOGLE_CLOUD_PROJECT detected. No secrets found.")
-# [END gaestd_py_django_secret_config]
+
+
+
+# -----------------------------------------------------------------------------
+
 
 SECRET_KEY = env("SECRET_KEY")
-
-# SECURITY WARNING: don't run with debug turned on in production!
-# Change this to "False" when you are ready for production
 DEBUG = env("DEBUG")
 
 
-# [START gaestd_py_django_csrf]
-# SECURITY WARNING: It's recommended that you use this when
-# running in production. The URL will be known once you first deploy
-# to App Engine. This code takes the URL and converts it to both these settings formats.
+
+# -----------------------------------------------------------------------------
+#  gaestd_py_django_csrf
+
+# SECURITY WARNING: It's recommended that you use this when running in production.
+# The URL will be known once you first deploy to App Engine.
+# This code takes the URL and converts it to both these settings formats.
+
 APPENGINE_URL = env("APPENGINE_URL", default=None)
 if APPENGINE_URL:
     # Ensure a scheme is present in the URL before it's processed.
     if not urlparse(APPENGINE_URL).scheme:
         APPENGINE_URL = f"https://{APPENGINE_URL}"
 
-    ALLOWED_HOSTS = [urlparse(APPENGINE_URL).netloc]
+    # ALLOWED_HOSTS = [urlparse(APPENGINE_URL).netloc]
+    # For enabling older app versions to host site
+    ALLOWED_HOSTS = ['*']
+
     CSRF_TRUSTED_ORIGINS = [APPENGINE_URL]
     SECURE_SSL_REDIRECT = True
-else:
-    ALLOWED_HOSTS = ["*"]
-# [END gaestd_py_django_csrf]
 
-# Application definition
+    # For get_absolute_url methods
+    SERVER_ADDRESS = "https://autarchia.lm.r.appspot.com"
+
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        'https://8000-cs-570532252862-default.cs-europe-west4-fycr.cloudshell.dev'
+    ]
+    ALLOWED_HOSTS = [
+        '127.0.0.1',
+    ]
+
+    # For get_absolute_url methods
+    SERVER_ADDRESS = '127.0.0.1:8000'
+
+
+
+# -----------------------------------------------------------------------------
+
 
 INSTALLED_APPS = [
-    "polls.apps.PollsConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
+    # imported
+    # 'crispy_forms',
+    # 'debug_toolbar',
+    # 'django_filters',
+
+    # own
+    "polls",
 ]
 
 MIDDLEWARE = [
+    "debug_toolbar.middleware.DebugToolbarMiddleware",
+
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -105,7 +125,7 @@ ROOT_URLCONF = "mysite.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [os.path.join(BASE_DIR, 'templates')],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -114,29 +134,37 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
+            'libraries': {
+                'custom_filters': 'templatetags.custom_filters',
+            },
         },
     },
 ]
 
 WSGI_APPLICATION = "mysite.wsgi.application"
 
+
+
+# -----------------------------------------------------------------------------
 # Database
-# [START db_setup]
-# [START gaestd_py_django_database_config]
-# Use django-environ to parse the connection string
-DATABASES = {"default": env.db()}
 
-# If the flag as been set, configure to use proxy
-if os.getenv("USE_CLOUD_SQL_AUTH_PROXY", None):
-    DATABASES["default"]["HOST"] = "127.0.0.1"
-    DATABASES["default"]["PORT"] = 5432
-
-# [END gaestd_py_django_database_config]
-# [END db_setup]
-
-# Use a in-memory sqlite3 database when testing in CI systems
-# TODO(glasnt) CHECK IF THIS IS REQUIRED because we're setting a val above
-if os.getenv("TRAMPOLINE_CI", None):
+if os.getenv('GAE_ENV', '').startswith('standard'):
+    # Requires DATABASE_URL environmental variable to be set
+    DATABASES = {
+        "default": env.db()
+    }
+elif IS_LOCAL_ENVIRON:
+    DATABASES = {
+        'default': {
+            'ENGINE': env('LOCAL_DB_ENGINE'),
+            'NAME': env('LOCAL_DB_DBNAME'),
+            'USER': env('LOCAL_DB_USER'),
+            'PASSWORD': env('LOCAL_DB_PASSWORD'),
+            'HOST': env('LOCAL_DB_HOST'),
+            'PORT': env('LOCAL_DB_PORT'),
+        }
+    }
+else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -144,6 +172,12 @@ if os.getenv("TRAMPOLINE_CI", None):
         }
     }
 
+
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
+
+
+# -----------------------------------------------------------------------------
 # Password validation
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -161,21 +195,76 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+
+
+# -----------------------------------------------------------------------------
 # Internationalization
 
-LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+# https://docs.djangoproject.com/en/2.2/topics/i18n/
+LANGUAGE_CODE = 'pl'
+pl_formats.DATE_FORMAT = "Y-m-d"
+TIME_ZONE = 'Europe/Warsaw'
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True
 
+
+
+# -----------------------------------------------------------------------------
 # Static files (CSS, JavaScript, Images)
 
-STATIC_ROOT = "static"
-STATIC_URL = "/static/"
-STATICFILES_DIRS = []
+if os.getenv('GAE_ENV', '').startswith('standard'):
+    # https://medium.com/@umeshsaruk/upload-to-google-cloud-storage-using-django-storages-72ddec2f0d05
 
-# Default primary key field type
-# https://docs.djangoproject.com/en/3.2/ref/settings/#default-auto-field
+    # For media storage in the bucket
+    GOOGLE_APPLICATION_CREDENTIALS = env("GOOGLE_APPLICATION_CREDENTIALS")
+    GS_CREDENTIALS = service_account.Credentials.from_service_account_file(
+        GOOGLE_APPLICATION_CREDENTIALS)
+    # This might be needed to access Cloud Storage without credentials,
+    # which should by possible from App Engine
+    # https://pnote.eu/notes/django-app-engine-user-uploaded-files/
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+    GS_DEFAULT_ACL = 'publicRead'
+
+    # TODO check if only one is needed: GS_CREDENTIALS or GS_DEFAULT_ACL
+
+    DEFAULT_FILE_STORAGE = 'mysite.storages.GoogleCloudMediaFileStorage'
+    STATICFILES_STORAGE = 'mysite.storages.GoogleCloudStaticFileStorage'
+
+    GS_PROJECT_ID = 'autarchia'
+    GS_BUCKET_NAME = env("GS_BUCKET_NAME")
+
+    STATIC_URL = f"https://storage.googleapis.com/{GS_BUCKET_NAME}/static/"
+    STATIC_ROOT = "static/"
+
+    MEDIA_URL = f"https://storage.googleapis.com/{GS_BUCKET_NAME}/media/"
+    MEDIA_ROOT = "media/"
+
+else:
+    # Use these settings to run "python manage.py collectstatic"
+    # STATIC_ROOT = "static"
+    # STATIC_URL = "/static/"
+    # STATICFILES_DIRS = []
+
+    # STATIC_ROOT necessary oly in production (but also neede for collectstatic)
+    STATIC_URL = 'static/'
+    STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
+
+    MEDIA_ROOT = 'media'
+    MEDIA_URL = 'media/'
+
+
+# -----------------------------------------------------------------------------
+# debug-toolbar
+
+INTERNAL_IPS = ['127.0.0.1', ]
+# debug-toolbar not rendering problem:
+# https://www.taricorp.net/2020/windows-mime-pitfalls/
+# https://stackoverflow.com/questions/16303098/django-development-server-and-mime-types/64055514#64055514
+# After editing registry - restart local server for changes to take effect
+
+# Disable in production (even if DEBUG is set to true)
+if os.getenv('GAE_ENV', '').startswith('standard'):
+    DEBUG_TOOLBAR_CONFIG = {
+        'SHOW_TOOLBAR_CALLBACK': lambda r: False,
+    }

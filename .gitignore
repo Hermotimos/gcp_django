@@ -36,12 +36,10 @@ PyCharm_ReferenceCard.pdf
 __pycache__
 
 
-hyllemath_db*
-hyllemat*
 sandbox*
 
 myproject/secret.json
 
 
 .htmlhintrc
-requirements_old.txt
+

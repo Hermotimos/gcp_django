@@ -1,15 +1,12 @@
-# Getting started with Django on Google Cloud Platform on App Engine Standard
+# STEPS:
+# rename everywhere 'mysite' to the desired project name
+# prepare env (requires database setup)
+# create & activate virtualenv
+# pip install -r requirements.txt (!! remove stuff for Google Storage if not needed together with mysite.storages.py)
 
-[![Open in Cloud Shell][shell_img]][shell_link]
-
-[shell_img]: http://gstatic.com/cloudssh/images/open-btn.png
-[shell_link]: https://console.cloud.google.com/cloudshell/open?git_repo=https://github.com/GoogleCloudPlatform/python-docs-samples&page=editor&open_in_editor=appengine/standard_python38/django/README.md
-
-This repository is an example of how to run a [Django](https://www.djangoproject.com/) 
-app on Google App Engine Standard Environment. It uses the 
-[Writing your first Django app](https://docs.djangoproject.com/en/3.2/intro/tutorial01/) as the 
-example app to deploy.
-
-
-# Tutorial
-See our [Running Django in the App Engine Standard Environment](https://cloud.google.com/python/django/appengine) tutorial for instructions for setting up and deploying this sample application.
+# python manage.py migrate
+# python manage.py createsuperuser
+# python manage.py makemigrations polls
+# python manage.py migrate
+# python manage.py collectstatic (!! uncomment the right static conf in settings.py)
+# python manage.py runserver
