@@ -73,7 +73,7 @@ if APPENGINE_URL:
     SECURE_SSL_REDIRECT = True
 
     # For get_absolute_url methods
-    SERVER_ADDRESS = "https://autarchia.lm.r.appspot.com"
+    SERVER_ADDRESS = "https://autarchia.oa.r.appspot.com"
 
 else:
     CSRF_TRUSTED_ORIGINS = [
